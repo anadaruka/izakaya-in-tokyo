@@ -1,5 +1,6 @@
 :root {
-  --bg: #17110d;
+  /* matches the scene's edge color after the watercolor shader pass */
+  --bg: #201813;
   --ink: #d9d0c4;
   --muted: #8f8375;
   --faint: #5f564b;

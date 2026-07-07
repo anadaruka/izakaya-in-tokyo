@@ -30,8 +30,13 @@ Everything is drawn programmatically in [scene.js](scene.js) — no images.
   then the dynamic life goes on top — interior glow and flicker, the chef,
   steam, the noren and lanterns swaying on layered-sine wind, the pool of
   light on the street, and the people.
-- The composed frame is then drawn once sharp and once blurred on top of
-  itself, which gives everything its soft, watery edge.
+- The composed frame then goes through a WebGL fragment shader that makes it
+  a watercolor: fbm-noise domain warping so no line stays quite straight, a
+  small diffusion kernel like pigment spreading into wet paper, multiplicative
+  granulation (coarse blotches + the fine tooth of the sheet), slow tonal
+  washes, and color blending — shadows cool off, light warms up, and black
+  lifts toward the paper. If WebGL is unavailable it falls back to a gentle
+  canvas blur.
 - People are a tiny state machine: walk in → sit down → stay (20–60s) →
   stand up → walk away. Passers-by cross without stopping. Arrival times are
   random, so the shop is never the same twice.

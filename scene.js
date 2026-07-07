@@ -9,7 +9,6 @@
 
 (() => {
   const canvas = document.getElementById("scene");
-  const ctx = canvas.getContext("2d");
   const captionEl = document.getElementById("caption");
 
   const W = 760;
@@ -395,10 +394,10 @@
     g.fillStyle = vg;
     g.fillRect(0, 0, W, H);
 
-    // paper grain (kept crisp above the soft paint)
-    for (let i = 0; i < 3200; i++) {
+    // a little paper grain (the shader adds the real tooth)
+    for (let i = 0; i < 1200; i++) {
       const brightDot = rng() > 0.5;
-      g.fillStyle = brightDot ? "rgba(255, 240, 220, 0.03)" : "rgba(0, 0, 0, 0.05)";
+      g.fillStyle = brightDot ? "rgba(255, 240, 220, 0.02)" : "rgba(0, 0, 0, 0.035)";
       g.fillRect(rng() * W, rng() * H, 1.4, 1.4);
     }
   }
@@ -1202,11 +1201,136 @@
   }
 
   // ---------------------------------------------------------------
+  // the paper: a webgl pass that turns each frame into watercolor —
+  // wobbled edges, pigment granulation, washes, and color blending
+  // (the same way farayan's san francisco piece works)
+  // ---------------------------------------------------------------
+
+  function createPainter(target) {
+    const gl = target.getContext("webgl", { alpha: false, antialias: false });
+    if (!gl) return null;
+
+    const vsrc = `
+      attribute vec2 aPos;
+      varying vec2 vUv;
+      void main() {
+        vUv = aPos * 0.5 + 0.5;
+        gl_Position = vec4(aPos, 0.0, 1.0);
+      }`;
+
+    const fsrc = `
+      precision highp float;
+      varying vec2 vUv;
+      uniform sampler2D uTex;
+      uniform vec2 uRes;
+
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * vnoise(p); p *= 2.03; a *= 0.5; }
+        return v;
+      }
+
+      void main() {
+        vec2 uv = vUv;
+        vec2 px = 1.0 / uRes;
+
+        // hand wobble: no line stays quite straight
+        vec2 wf = uv * vec2(9.0, 6.6);
+        vec2 warp = vec2(fbm(wf), fbm(wf + vec2(5.2, 1.3))) - 0.5;
+        vec2 wuv = uv + warp * px * 5.0;
+
+        // gentle diffusion, pigment spreading into wet paper
+        vec3 c = texture2D(uTex, wuv).rgb * 0.38;
+        c += texture2D(uTex, wuv + vec2( 1.8,  0.4) * px).rgb * 0.155;
+        c += texture2D(uTex, wuv + vec2(-1.8, -0.4) * px).rgb * 0.155;
+        c += texture2D(uTex, wuv + vec2( 0.4,  1.8) * px).rgb * 0.155;
+        c += texture2D(uTex, wuv + vec2(-0.4, -1.8) * px).rgb * 0.155;
+
+        float lum = dot(c, vec3(0.299, 0.587, 0.114));
+
+        // granulation: coarse pigment blotches and the fine tooth of the sheet
+        float g1 = fbm(uv * uRes / 7.0);
+        float g2 = vnoise(uv * uRes / 2.2);
+        float mid = smoothstep(0.02, 0.22, lum) * (1.0 - smoothstep(0.65, 1.0, lum));
+        c *= 1.0 + (g1 - 0.5) * 0.30 * mid + (g2 - 0.5) * 0.16 * mid;
+
+        // slow washes of tone drifting across the sheet
+        float wash = fbm(uv * 2.6 + 3.7);
+        c *= 1.0 + (wash - 0.5) * 0.12;
+
+        // color blending: shadows cool off, light warms up, black lifts to paper
+        c = mix(c, c * vec3(0.95, 0.98, 1.07), (1.0 - lum) * 0.28);
+        c = mix(c, c * vec3(1.07, 1.0, 0.93), smoothstep(0.45, 0.9, lum) * 0.2);
+        c += vec3(0.040, 0.032, 0.026) * (1.0 - smoothstep(0.0, 0.35, lum));
+
+        gl_FragColor = vec4(c, 1.0);
+      }`;
+
+    function compile(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        return null;
+      }
+      return s;
+    }
+    const vs = compile(gl.VERTEX_SHADER, vsrc);
+    const fs = compile(gl.FRAGMENT_SHADER, fsrc);
+    if (!vs || !fs) return null;
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(prog));
+      return null;
+    }
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, "aPos");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+    const uResLoc = gl.getUniformLocation(prog, "uRes");
+
+    return {
+      draw(source) {
+        gl.viewport(0, 0, target.width, target.height);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+        gl.uniform2f(uResLoc, target.width, target.height);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------
   // frame
   // ---------------------------------------------------------------
 
   const offCtx = off.getContext("2d");
   const canFilter = typeof offCtx.filter === "string";
+  const painter = createPainter(canvas);
+  const ctx2d = painter ? null : canvas.getContext("2d");
 
   let tAnim = 0;
   let lastNow = 0;
@@ -1302,18 +1426,24 @@
     g.fillStyle = `rgba(23, 17, 13, ${(0.05 + 0.035 * Math.sin(t * 0.11)) * (0.4 + 0.6 * nightK)})`;
     g.fillRect(0, 0, W, H);
 
-    // --- compose: sharp base + a blurred pass over it = soft watercolor air ---
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    ctx.drawImage(off, 0, 0, W, H);
-    if (canFilter) {
-      ctx.save();
-      ctx.globalAlpha = 0.52;
-      ctx.filter = "blur(3.5px)";
-      ctx.drawImage(off, 0, 0, W, H);
-      ctx.restore();
+    g.drawImage(fgLayer, 0, 0, W, H);
+
+    // --- the paper pass: the whole frame becomes a watercolor ---
+    if (painter) {
+      painter.draw(off);
+    } else {
+      // no webgl: fall back to a gentle diffusion
+      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx2d.clearRect(0, 0, W, H);
+      ctx2d.drawImage(off, 0, 0, W, H);
+      if (canFilter) {
+        ctx2d.save();
+        ctx2d.globalAlpha = 0.4;
+        ctx2d.filter = "blur(2px)";
+        ctx2d.drawImage(off, 0, 0, W, H);
+        ctx2d.restore();
+      }
     }
-    ctx.drawImage(fgLayer, 0, 0, W, H);
 
     updateCaption(h, openK);
   }

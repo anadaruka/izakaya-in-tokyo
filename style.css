@@ -1,9 +1,9 @@
 :root {
-  /* matches the scene's edge color after the watercolor shader pass */
-  --bg: #201813;
-  --ink: #d9d0c4;
-  --muted: #8f8375;
-  --faint: #5f564b;
+  /* warm cream paper — the painting sits on it like a print */
+  --bg: #f2ecdf;
+  --ink: #4a4136;
+  --muted: #8a7f6e;
+  --faint: #b3a793;
 }
 
 * {
@@ -22,7 +22,7 @@ body {
 }
 
 main {
-  width: min(760px, 100vw - 2rem);
+  width: min(700px, 100vw - 2rem);
   margin: 0 auto;
   padding: 4.5rem 0 5rem;
 }
@@ -46,7 +46,7 @@ h1 {
   line-height: 1.65;
   color: var(--muted);
   max-width: 34rem;
-  margin-bottom: 2.4rem;
+  margin-bottom: 2.6rem;
 }
 
 .frame {
@@ -57,14 +57,13 @@ canvas {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 6px;
 }
 
 .caption {
-  margin-top: 1.1rem;
+  margin-top: 1.2rem;
   font-size: 0.78rem;
   color: var(--muted);
-  opacity: 0.55;
+  opacity: 0.65;
 }
 
 @keyframes settle {

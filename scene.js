@@ -1,20 +1,39 @@
 /* an izakaya in tokyo — a quiet generative scene.
-   everything is painted by hand on a 760x560 canvas: soft watercolor
-   light, lanterns on the wind, and people who drift in, sit at the
-   counter for a while, and drift on.
+
+   a small watercolor on cream paper: you're standing across the street
+   from an izakaya somewhere outside tokyo, a little drunk, a little
+   lost. lanterns lean into the wind, mist drifts down the block, the
+   city hums somewhere behind you in circles of out-of-focus light.
+   people drift in, stay a while, and drift on.
 
    the scene lives on tokyo time. the shop opens at 5pm and pulls the
    shutter down at 5am; the sky moves through dawn, day, dusk and night.
-   ?hour=21.5 pins the clock, ?speed=10 makes ten minutes pass per second. */
+   ?hour=21.5 pins the clock, ?speed=10 makes ten minutes pass per second.
+
+   every frame is painted in 2d canvas, then run through a webgl shader
+   that turns it into watercolor: noise-warped edges, pigment
+   granulation, washes, and color blending. */
 
 (() => {
   const canvas = document.getElementById("scene");
   const captionEl = document.getElementById("caption");
 
-  const W = 760;
-  const H = 560;
-  const PAGE_BG = "#17110d";
+  // the sheet of paper
+  const W = 840;
+  const H = 480;
+  const PAPER = "#f2ecdf";
   const JP_FONT = '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif';
+
+  // the shop itself is drawn in its own coordinate space (760x560) and
+  // placed small in the middle of the sheet, so you stand further back
+  const S = 0.55;
+  const TX = 211;
+  const TY = 146;
+  const GROUND = TY + S * 430; // where the shop floor meets the street
+
+  // walkers live in shop-space; these bounds reach the paper's edges
+  const WALK_MIN = -400;
+  const WALK_MAX = 1160;
 
   // glow center of the shop interior — rim light on people points at this
   const GLOW = { x: 380, y: 250 };
@@ -49,23 +68,12 @@
   // slow layered sines: smooth wind, -1..1, with slower gusts underneath
   function wind(t) {
     const gust = 0.55 + 0.45 * Math.sin(t * 0.045 + 1.3);
-    return gust * (Math.sin(t * 0.35) * 0.55 + Math.sin(t * 0.13 + 2.1) * 0.3 + Math.sin(t * 0.62 + 4.0) * 0.15);
+    return gust * (Math.sin(t * 0.28) * 0.55 + Math.sin(t * 0.11 + 2.1) * 0.3 + Math.sin(t * 0.5 + 4.0) * 0.15);
   }
 
   // gentle lamp flicker, 0..1
   function flicker(t) {
-    return 0.5 + 0.4 * Math.sin(t * 1.3 + Math.sin(t * 2.7)) + 0.1 * Math.sin(t * 9.7);
-  }
-
-  function capsule(g, x, y, w, h) {
-    // vertical capsule, (x,y) = top center
-    const r = w / 2;
-    g.beginPath();
-    g.arc(x, y + r, r, Math.PI, 0);
-    g.lineTo(x + r, y + h - r);
-    g.arc(x, y + h - r, r, 0, Math.PI);
-    g.closePath();
-    g.fill();
+    return 0.5 + 0.4 * Math.sin(t * 1.1 + Math.sin(t * 2.3)) + 0.1 * Math.sin(t * 8.1);
   }
 
   function verticalText(g, chars, x, y, size, gap, color, alpha = 1) {
@@ -95,18 +103,18 @@
     return 0;
   }
 
-  // palette keyframes across the day: sky, air wash, light and color of everything
+  // palette keyframes across the day — nights lean blue-violet, dreamy
   const DAYKEYS = [
-    { h: 0.0,  sky0: [26, 17, 22],    sky1: [15, 11, 12],    air: [22, 15, 28, 0.14],   bright: 1.0,  sat: 1.0 },
-    { h: 4.6,  sky0: [26, 17, 22],    sky1: [15, 11, 12],    air: [22, 15, 28, 0.14],   bright: 1.0,  sat: 1.0 },
-    { h: 6.0,  sky0: [74, 64, 88],    sky1: [122, 90, 82],   air: [168, 138, 150, 0.1], bright: 1.1,  sat: 0.85 },
-    { h: 8.0,  sky0: [125, 130, 144], sky1: [168, 154, 134], air: [205, 205, 208, 0.12], bright: 1.28, sat: 0.66 },
-    { h: 12.0, sky0: [154, 162, 171], sky1: [192, 180, 160], air: [222, 222, 222, 0.13], bright: 1.4,  sat: 0.58 },
-    { h: 15.5, sky0: [143, 138, 136], sky1: [184, 164, 136], air: [214, 200, 180, 0.12], bright: 1.32, sat: 0.66 },
-    { h: 17.3, sky0: [106, 78, 88],   sky1: [162, 102, 78],  air: [228, 150, 92, 0.1],  bright: 1.14, sat: 0.92 },
-    { h: 18.7, sky0: [58, 42, 62],    sky1: [78, 50, 48],    air: [96, 64, 88, 0.1],    bright: 1.04, sat: 0.98 },
-    { h: 20.0, sky0: [32, 22, 34],    sky1: [22, 16, 17],    air: [30, 20, 36, 0.12],   bright: 1.0,  sat: 1.0 },
-    { h: 24.0, sky0: [26, 17, 22],    sky1: [15, 11, 12],    air: [22, 15, 28, 0.14],   bright: 1.0,  sat: 1.0 },
+    { h: 0.0,  sky0: [30, 28, 52],    sky1: [19, 16, 27],    air: [44, 42, 78, 0.12],    bright: 1.0,  sat: 1.0 },
+    { h: 4.6,  sky0: [30, 28, 52],    sky1: [19, 16, 27],    air: [44, 42, 78, 0.12],    bright: 1.0,  sat: 1.0 },
+    { h: 6.0,  sky0: [86, 80, 110],   sky1: [140, 110, 105], air: [170, 150, 170, 0.1],  bright: 1.1,  sat: 0.82 },
+    { h: 8.0,  sky0: [130, 136, 150], sky1: [172, 158, 140], air: [208, 208, 212, 0.12], bright: 1.28, sat: 0.64 },
+    { h: 12.0, sky0: [158, 166, 176], sky1: [196, 184, 166], air: [224, 224, 224, 0.13], bright: 1.4,  sat: 0.56 },
+    { h: 15.5, sky0: [148, 142, 140], sky1: [186, 166, 140], air: [216, 202, 184, 0.12], bright: 1.32, sat: 0.64 },
+    { h: 17.3, sky0: [116, 84, 110],  sky1: [172, 110, 92],  air: [232, 150, 110, 0.1],  bright: 1.14, sat: 0.9 },
+    { h: 18.7, sky0: [64, 52, 92],    sky1: [86, 60, 76],    air: [104, 80, 120, 0.11],  bright: 1.05, sat: 0.96 },
+    { h: 20.0, sky0: [38, 34, 62],    sky1: [26, 20, 32],    air: [48, 44, 84, 0.12],    bright: 1.0,  sat: 1.0 },
+    { h: 24.0, sky0: [30, 28, 52],    sky1: [19, 16, 27],    air: [44, 42, 78, 0.12],    bright: 1.0,  sat: 1.0 },
   ];
 
   function palette(h) {
@@ -131,50 +139,104 @@
   }
 
   // ---------------------------------------------------------------
-  // static layers (painted once): the facade, and the paper on top
+  // layers
   // ---------------------------------------------------------------
 
   const facadeLayer = document.createElement("canvas");
   const fgLayer = document.createElement("canvas");
   const off = document.createElement("canvas"); // per-frame compose target
 
-  // lit windows in the distant buildings, drawn dynamically at night
+  function canvasSpace(g) {
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function sceneSpace(g) {
+    g.setTransform(dpr * S, 0, 0, dpr * S, dpr * TX, dpr * TY);
+  }
+
+  // lit windows in the distant buildings (paper coords), drawn at night
   const cityWindows = (() => {
     const rng = mulberry32(11);
     const list = [];
-    for (let i = 0; i < 9; i++) {
-      const side = rng() > 0.5;
-      list.push({ x: side ? 590 + rng() * 160 : rng() * 130, y: 14 + rng() * 70, a: 0.1 + rng() * 0.14 });
+    for (let i = 0; i < 14; i++) {
+      const left = rng() > 0.5;
+      list.push({
+        x: left ? 8 + rng() * 180 : 660 + rng() * 170,
+        y: 250 + rng() * 100,
+        a: 0.08 + rng() * 0.14,
+      });
     }
     return list;
   })();
 
   function paintFacade() {
     const g = facadeLayer.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvasSpace(g);
     g.clearRect(0, 0, W, H);
     const rng = mulberry32(7);
 
-    // distant buildings, barely there (sky shows through around them)
-    g.fillStyle = "#181210";
-    for (const [bx, bw, bh] of [[-30, 150, 96], [96, 90, 60], [560, 110, 72], [648, 140, 108]]) {
-      g.fillRect(bx, 0, bw, bh);
+    // ---- the block around the shop, in paper coords ----
+
+    // neighboring buildings, dim and far
+    g.fillStyle = "#1b1824";
+    g.fillRect(-10, 235, 130, 150);
+    g.fillRect(88, 285, 108, 100);
+    g.fillStyle = "#191622";
+    g.fillRect(652, 262, 120, 122);
+    g.fillRect(742, 222, 110, 162);
+    // a few dark window pits
+    g.fillStyle = "rgba(10, 8, 14, 0.5)";
+    for (const [bx, by] of [[16, 258], [52, 262], [98, 302], [676, 282], [706, 286], [766, 244], [800, 248], [770, 300]]) {
+      g.fillRect(bx + rng() * 4, by + rng() * 4, 12, 16);
     }
 
-    // utility pole + cables
-    g.strokeStyle = "rgba(120, 105, 95, 0.3)";
-    g.lineWidth = 5;
+    // a neon strip on the right building, unlit here
+    g.fillStyle = "#2c2030";
+    g.fillRect(796, 262, 13, 78);
+
+    // vending machine by the alley, unlit here
+    g.fillStyle = "#1c2430";
+    g.fillRect(700, 330, 30, 52);
+    g.fillStyle = "#26344a";
+    g.fillRect(703, 334, 24, 30);
+
+    // utility pole + cables, that tokyo tangle
+    g.strokeStyle = "rgba(140, 130, 130, 0.28)";
+    g.lineWidth = 4;
     g.beginPath();
-    g.moveTo(46, 0);
-    g.lineTo(50, 300);
+    g.moveTo(94, 42);
+    g.lineTo(98, GROUND);
     g.stroke();
-    g.lineWidth = 1.2;
-    for (const [y1, cy, y2] of [[36, 76, 10], [52, 96, 30]]) {
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(72, 70);
+    g.lineTo(120, 70);
+    g.stroke();
+    g.lineWidth = 1;
+    for (const [y1, cy, y2] of [[74, 118, 58], [86, 132, 78], [64, 92, 34]]) {
       g.beginPath();
-      g.moveTo(48, y1);
-      g.quadraticCurveTo(400, cy, 760, y2);
+      g.moveTo(96, y1);
+      g.quadraticCurveTo(430, cy, 840, y2);
       g.stroke();
     }
+
+    // the street, full width of the sheet
+    const st = g.createLinearGradient(0, GROUND, 0, H);
+    st.addColorStop(0, "#241c1e");
+    st.addColorStop(1, "#151013");
+    g.fillStyle = st;
+    g.fillRect(0, GROUND, W, H - GROUND);
+    g.strokeStyle = "rgba(255, 255, 255, 0.03)";
+    g.lineWidth = 1;
+    for (let i = 0; i < 10; i++) {
+      const sy = GROUND + 8 + rng() * (H - GROUND - 16);
+      g.beginPath();
+      g.moveTo(rng() * 400, sy);
+      g.lineTo(400 + rng() * 440, sy + rng() * 4 - 2);
+      g.stroke();
+    }
+
+    // ---- the shop, small in the middle of the block ----
+    sceneSpace(g);
 
     // roof + eave
     g.fillStyle = "#2a1c12";
@@ -200,7 +262,7 @@
       g.fillRect(wx + rng() * 10, wy + rng() * 20, 26, 38);
     }
 
-    // signboard (unlit here; its glow is painted each frame while the shop is open)
+    // signboard (unlit here; its glow is painted each frame while open)
     const sb = g.createLinearGradient(0, 92, 0, 134);
     sb.addColorStop(0, "#c8a068");
     sb.addColorStop(1, "#9c7846");
@@ -331,79 +393,60 @@
       g.stroke();
     }
 
-    // threshold + street
-    g.fillStyle = "#120d0a";
-    g.fillRect(0, 430, W, 6);
-    const st = g.createLinearGradient(0, 436, 0, H);
-    st.addColorStop(0, "#20160f");
-    st.addColorStop(1, "#150f0c");
-    g.fillStyle = st;
-    g.fillRect(0, 436, W, H - 436);
-    g.strokeStyle = "rgba(255, 255, 255, 0.025)";
-    g.lineWidth = 1;
-    for (let i = 0; i < 12; i++) {
-      const sy = 442 + rng() * 110;
-      g.beginPath();
-      g.moveTo(rng() * 300, sy);
-      g.lineTo(300 + rng() * 460, sy + rng() * 4 - 2);
-      g.stroke();
-    }
+    // threshold
+    g.fillStyle = "#161014";
+    g.fillRect(100, 430, 560, 8);
+
+    canvasSpace(g);
   }
 
   function paintForeground() {
     const g = fgLayer.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvasSpace(g);
     g.clearRect(0, 0, W, H);
     const rng = mulberry32(23);
 
-    // watercolor edges: the scene dissolves into the page
-    const fade = 56;
+    // the painting ends before the paper does: a narrow soft fade
+    const fade = 34;
     for (const [x0, y0, x1, y1] of [
       [0, 0, 0, fade], [0, H, 0, H - fade], [0, 0, fade, 0], [W, 0, W - fade, 0],
     ]) {
       const lg = g.createLinearGradient(x0, y0, x1, y1);
-      lg.addColorStop(0, PAGE_BG);
-      lg.addColorStop(1, "rgba(23, 17, 13, 0)");
+      lg.addColorStop(0, PAPER);
+      lg.addColorStop(1, "rgba(242, 236, 223, 0)");
       g.fillStyle = lg;
       g.fillRect(0, 0, W, H);
     }
 
-    // irregular blooms eating into the border, like unfinished paper
+    // a slightly irregular line where the wash stopped
     g.save();
-    g.shadowColor = PAGE_BG;
-    g.shadowBlur = 40;
-    for (let i = 0; i < 70; i++) {
+    g.shadowColor = PAPER;
+    g.shadowBlur = 22;
+    for (let i = 0; i < 60; i++) {
       const edge = Math.floor(rng() * 4);
       let x, y;
-      if (edge === 0) { x = rng() * W; y = rng() * 22; }
-      else if (edge === 1) { x = rng() * W; y = H - rng() * 22; }
-      else if (edge === 2) { x = rng() * 22; y = rng() * H; }
-      else { x = W - rng() * 22; y = rng() * H; }
-      g.globalAlpha = 0.06 + rng() * 0.13;
-      g.fillStyle = PAGE_BG;
+      if (edge === 0) { x = rng() * W; y = rng() * 10; }
+      else if (edge === 1) { x = rng() * W; y = H - rng() * 10; }
+      else if (edge === 2) { x = rng() * 10; y = rng() * H; }
+      else { x = W - rng() * 10; y = rng() * H; }
+      g.globalAlpha = 0.1 + rng() * 0.18;
+      g.fillStyle = PAPER;
       g.beginPath();
-      g.arc(x, y, 14 + rng() * 28, 0, Math.PI * 2);
+      g.arc(x, y, 6 + rng() * 14, 0, Math.PI * 2);
       g.fill();
     }
     g.restore();
 
-    // corner vignette
-    const vg = g.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.82);
-    vg.addColorStop(0, "rgba(10, 7, 5, 0)");
-    vg.addColorStop(1, "rgba(10, 7, 5, 0.32)");
-    g.fillStyle = vg;
-    g.fillRect(0, 0, W, H);
-
-    // a little paper grain (the shader adds the real tooth)
+    // a little grain (the shader adds the real tooth)
     for (let i = 0; i < 1200; i++) {
       const brightDot = rng() > 0.5;
-      g.fillStyle = brightDot ? "rgba(255, 240, 220, 0.02)" : "rgba(0, 0, 0, 0.035)";
+      g.fillStyle = brightDot ? "rgba(255, 248, 235, 0.02)" : "rgba(40, 30, 24, 0.03)";
       g.fillRect(rng() * W, rng() * H, 1.4, 1.4);
     }
   }
 
   // ---------------------------------------------------------------
-  // lanterns
+  // lanterns (shop space)
   // ---------------------------------------------------------------
 
   const bigLanterns = [
@@ -531,7 +574,7 @@
   }
 
   // ---------------------------------------------------------------
-  // noren + shutter
+  // noren + shutter (shop space)
   // ---------------------------------------------------------------
 
   function drawNoren(g, t, wd, alpha) {
@@ -602,7 +645,7 @@
   }
 
   // ---------------------------------------------------------------
-  // people
+  // people — soft gouache figures, not silhouettes (shop space)
   // ---------------------------------------------------------------
 
   const stools = [
@@ -612,7 +655,7 @@
     { x: 492, busy: null },
   ];
 
-  const TINTS = ["#141019", "#1a1420", "#191016", "#120e14"];
+  const COATS = ["#343044", "#3a3450", "#2e2c3e", "#403646", "#33303b"];
 
   const people = [];
   let nextArrival = 0;
@@ -624,17 +667,16 @@
       kind,
       female,
       hairBun: female && Math.random() < 0.4,
-      skirt: female && Math.random() < 0.5,
+      pale: Math.random() < 0.45, // a pale shirt under the coat
       state: "in",
       x: 0,
       dir: 1,
-      speed: rand(34, 52),
+      speed: rand(26, 40),
       h: female ? rand(76, 92) : rand(84, 102),
       baseY: kind === "passer" ? rand(508, 524) : rand(452, 462),
       phase: rand(0, 6.28),
       swayPhase: rand(0, 6.28),
-      bag: Math.random() < 0.35,
-      tint: TINTS[Math.floor(Math.random() * TINTS.length)],
+      coat: COATS[Math.floor(Math.random() * COATS.length)],
       alpha: 1,
       stool: null,
       t0: 0,
@@ -648,7 +690,7 @@
     const s = free[Math.floor(Math.random() * free.length)];
     const p = makeWalker("patron");
     p.dir = Math.random() < 0.5 ? 1 : -1;
-    p.x = p.dir === 1 ? -50 : W + 50;
+    p.x = p.dir === 1 ? WALK_MIN : WALK_MAX;
     p.stool = s;
     s.busy = p;
     people.push(p);
@@ -658,8 +700,7 @@
   function spawnPasser() {
     const p = makeWalker("passer");
     p.dir = Math.random() < 0.5 ? 1 : -1;
-    p.x = p.dir === 1 ? -60 : W + 60;
-    p.speed = rand(30, 58);
+    p.x = p.dir === 1 ? WALK_MIN : WALK_MAX;
     people.push(p);
   }
 
@@ -669,7 +710,7 @@
     if (female !== undefined) p.female = female;
     p.hairBun = p.female && Math.random() < 0.4;
     p.state = "seated";
-    p.until = t + rand(14, 45);
+    p.until = t + rand(20, 60);
   }
 
   function updatePerson(p, dt, t, openK) {
@@ -677,13 +718,12 @@
       case "in": {
         p.x += p.dir * p.speed * dt;
         if (p.kind === "patron" && openK < 0.5) {
-          // arrived at a shut door — keep walking
           if (p.stool) p.stool.busy = null;
           p.stool = null;
           p.kind = "passer";
         }
         if (p.kind === "passer") {
-          if (p.x < -80 || p.x > W + 80) p.dead = true;
+          if (p.x < WALK_MIN - 20 || p.x > WALK_MAX + 20) p.dead = true;
           break;
         }
         if (Math.abs(p.x - p.stool.x) < 3) {
@@ -693,9 +733,9 @@
         break;
       }
       case "sitdown": {
-        if (t - p.t0 > 1.1) {
+        if (t - p.t0 > 1.3) {
           p.state = "seated";
-          p.until = t + rand(22, 62);
+          p.until = t + rand(28, 75);
         }
         break;
       }
@@ -707,7 +747,7 @@
         break;
       }
       case "standup": {
-        if (t - p.t0 > 1.1) {
+        if (t - p.t0 > 1.3) {
           p.state = "out";
           p.dir = Math.random() < 0.5 ? 1 : -1;
           p.stool.busy = null;
@@ -717,7 +757,7 @@
       }
       case "out": {
         p.x += p.dir * p.speed * dt;
-        if (p.x < -80 || p.x > W + 80) p.dead = true;
+        if (p.x < WALK_MIN - 20 || p.x > WALK_MAX + 20) p.dead = true;
         break;
       }
     }
@@ -726,95 +766,83 @@
   function drawWalker(g, p, t, alpha, rise = 0) {
     if (alpha <= 0.01) return;
     const h = p.h;
-    const stride = p.x * 0.105 + p.phase;
-    const bob = Math.abs(Math.cos(stride)) * 1.8;
+    const bob = Math.abs(Math.sin(t * 2.2 + p.phase)) * 1.4;
     const yb = p.baseY - bob - rise;
+    const w = h * (p.female ? 0.3 : 0.34);
+    const lean = p.dir * h * 0.02;
 
     g.save();
-    g.globalAlpha = alpha * 0.95;
-    g.fillStyle = p.tint;
-    g.strokeStyle = p.tint;
-    g.shadowColor = p.tint;
-    g.shadowBlur = 5;
+    g.globalAlpha = alpha * 0.88;
+    g.shadowColor = p.coat;
+    g.shadowBlur = 6;
+
+    // quiet legs: two short strokes, barely moving
+    const step = Math.sin(p.x * 0.07 + p.phase) * h * 0.045;
+    g.strokeStyle = p.coat;
+    g.lineWidth = h * 0.065;
     g.lineCap = "round";
-
-    const spread = Math.sin(stride) * h * 0.1;
-
-    if (p.skirt) {
-      // a-line skirt, legs below the knee
-      g.lineWidth = h * 0.06;
-      g.beginPath();
-      g.moveTo(p.x + spread * 0.55, yb);
-      g.lineTo(p.x + spread * 0.4, yb - h * 0.24);
-      g.moveTo(p.x - spread * 0.55, yb);
-      g.lineTo(p.x - spread * 0.4, yb - h * 0.24);
-      g.stroke();
-      g.beginPath();
-      g.moveTo(p.x - h * 0.1, yb - h * 0.45);
-      g.lineTo(p.x + h * 0.1, yb - h * 0.45);
-      g.lineTo(p.x + h * 0.17, yb - h * 0.2);
-      g.lineTo(p.x - h * 0.17, yb - h * 0.2);
-      g.closePath();
-      g.fill();
-    } else {
-      g.lineWidth = h * 0.075;
-      g.beginPath();
-      g.moveTo(p.x, yb - h * 0.42);
-      g.lineTo(p.x + spread, yb);
-      g.moveTo(p.x, yb - h * 0.42);
-      g.lineTo(p.x - spread, yb);
-      g.stroke();
-    }
-
-    // torso
-    capsule(g, p.x, yb - h * 0.82, h * (p.female ? 0.24 : 0.27), h * 0.44);
-
-    // arm
-    g.lineWidth = h * 0.055;
     g.beginPath();
-    g.moveTo(p.x, yb - h * 0.72);
-    g.lineTo(p.x - spread * 0.6, yb - h * 0.44);
+    g.moveTo(p.x - w * 0.17 + step * 0.4, yb - h * 0.16);
+    g.lineTo(p.x - w * 0.17 + step, yb);
+    g.moveTo(p.x + w * 0.17 - step * 0.4, yb - h * 0.16);
+    g.lineTo(p.x + w * 0.17 - step, yb);
     g.stroke();
 
-    // head (+ hair)
-    const hy = yb - h + h * 0.075;
+    // one soft coat shape
+    g.fillStyle = p.coat;
     g.beginPath();
-    g.arc(p.x + p.dir * 1.5, hy, h * 0.075, 0, Math.PI * 2);
+    g.moveTo(p.x - w * 0.5, yb - h * 0.13);
+    g.bezierCurveTo(p.x - w * 0.56, yb - h * 0.5, p.x - w * 0.42 + lean, yb - h * 0.76, p.x - w * 0.26 + lean, yb - h * 0.8);
+    g.quadraticCurveTo(p.x + lean, yb - h * 0.87, p.x + w * 0.26 + lean, yb - h * 0.8);
+    g.bezierCurveTo(p.x + w * 0.42 + lean, yb - h * 0.76, p.x + w * 0.56, yb - h * 0.5, p.x + w * 0.5, yb - h * 0.13);
+    g.closePath();
+    g.fill();
+
+    // a pale shirt showing at the chest
+    if (p.pale) {
+      g.fillStyle = "rgba(212, 202, 184, 0.5)";
+      g.beginPath();
+      g.moveTo(p.x - w * 0.2 + lean, yb - h * 0.78);
+      g.quadraticCurveTo(p.x + lean, yb - h * 0.84, p.x + w * 0.2 + lean, yb - h * 0.78);
+      g.quadraticCurveTo(p.x + w * 0.22 + lean, yb - h * 0.6, p.x + lean, yb - h * 0.56);
+      g.quadraticCurveTo(p.x - w * 0.22 + lean, yb - h * 0.6, p.x - w * 0.2 + lean, yb - h * 0.78);
+      g.closePath();
+      g.fill();
+    }
+
+    // head + hair, one soft mass
+    const hx = p.x + lean;
+    const hy = yb - h + h * 0.085;
+    g.fillStyle = "#23202c";
+    g.beginPath();
+    g.arc(hx, hy, h * 0.078, 0, Math.PI * 2);
     g.fill();
     if (p.female) {
       if (p.hairBun) {
         g.beginPath();
-        g.arc(p.x - p.dir * h * 0.045, hy - h * 0.075, h * 0.042, 0, Math.PI * 2);
+        g.arc(hx - p.dir * h * 0.03, hy - h * 0.08, h * 0.04, 0, Math.PI * 2);
         g.fill();
       } else {
-        // hair falling to the shoulders
         g.beginPath();
-        g.moveTo(p.x + p.dir * 1.5 - h * 0.07, hy - h * 0.03);
-        g.quadraticCurveTo(p.x - p.dir * h * 0.11, yb - h * 0.86, p.x - p.dir * h * 0.09, yb - h * 0.68);
-        g.lineTo(p.x + p.dir * 0.02, yb - h * 0.7);
-        g.closePath();
+        g.ellipse(hx - p.dir * h * 0.02, hy + h * 0.09, h * 0.075, h * 0.11, 0, 0, Math.PI * 2);
         g.fill();
       }
     }
 
-    if (p.bag) {
-      g.fillRect(p.x - p.dir * h * 0.16, yb - h * 0.48, h * 0.11, h * 0.13);
-    }
-
     // warm rim as they pass through the shop's light
-    const warm = Math.max(0, 1 - Math.abs(p.x - GLOW.x) / 250);
+    const warm = Math.max(0, 1 - Math.abs(p.x - GLOW.x) / 260);
     if (warm > 0.05) {
       g.shadowBlur = 0;
-      const ang = Math.atan2(-1, GLOW.x > p.x ? 1 : -1);
-      g.strokeStyle = `rgba(255, 190, 120, ${0.42 * warm * alpha})`;
+      const side = GLOW.x > p.x ? 1 : -1;
+      g.strokeStyle = `rgba(255, 195, 130, ${0.3 * warm * alpha})`;
       g.lineWidth = 2;
       g.beginPath();
-      g.arc(p.x + p.dir * 1.5, hy, h * 0.075, ang - 0.9, ang + 0.9);
+      g.arc(hx, hy, h * 0.078, -Math.PI / 2 + side * 0.3, -Math.PI / 2 + side * 1.4);
       g.stroke();
-      g.strokeStyle = `rgba(255, 190, 120, ${0.24 * warm * alpha})`;
+      g.strokeStyle = `rgba(255, 195, 130, ${0.16 * warm * alpha})`;
       g.beginPath();
-      g.moveTo(p.x + (GLOW.x > p.x ? 1 : -1) * h * 0.13, yb - h * 0.78);
-      g.lineTo(p.x + (GLOW.x > p.x ? 1 : -1) * h * 0.13, yb - h * 0.5);
+      g.moveTo(p.x + side * w * 0.42, yb - h * 0.66);
+      g.lineTo(p.x + side * w * 0.46, yb - h * 0.3);
       g.stroke();
     }
     g.restore();
@@ -822,47 +850,51 @@
 
   function drawSitter(g, p, t, alpha) {
     if (alpha <= 0.01) return;
-    const x = p.stool.x + Math.sin(t * 0.5 + p.swayPhase) * 1.2;
-    const lean = Math.sin(t * 0.13 + p.phase) * 2;
+    const x = p.stool.x + Math.sin(t * 0.4 + p.swayPhase) * 1.1;
+    const lean = Math.sin(t * 0.11 + p.phase) * 2;
     const hx = x + lean;
-    const shw = p.female ? 11 : 13; // shoulder half-width
+    const w = p.female ? 26 : 30;
 
     g.save();
-    g.globalAlpha = alpha * 0.95;
-    g.fillStyle = p.tint;
-    g.shadowColor = p.tint;
-    g.shadowBlur = 3;
+    g.globalAlpha = alpha * 0.92;
+    g.shadowColor = p.coat;
+    g.shadowBlur = 5;
 
-    // lower legs dangle, feet hooked on the footrest — never touching the floor
-    g.strokeStyle = p.tint;
+    // lower legs, feet resting on the footrest
+    g.strokeStyle = p.coat;
     g.lineWidth = 6;
     g.lineCap = "round";
     g.beginPath();
-    g.moveTo(x - 9, 354);
-    g.quadraticCurveTo(x - 11, 368, x - 5, 382);
-    g.moveTo(x + 9, 354);
-    g.quadraticCurveTo(x + 11, 368, x + 5, 382);
+    g.moveTo(x - 8, 356);
+    g.quadraticCurveTo(x - 10, 368, x - 5, 381);
+    g.moveTo(x + 8, 356);
+    g.quadraticCurveTo(x + 10, 368, x + 5, 381);
     g.stroke();
 
-    // hunched back over the counter, seen from behind — wide and low
+    // one soft hunched form over the counter
+    g.fillStyle = p.coat;
     g.beginPath();
-    g.moveTo(x - 16, 358);
-    g.bezierCurveTo(x - 19, 336, x - 16 + lean, 322, hx - shw, 315);
-    g.quadraticCurveTo(hx, 307, hx + shw, 315);
-    g.bezierCurveTo(x + 16 + lean, 322, x + 19, 336, x + 16, 358);
+    g.moveTo(x - w * 0.55, 360);
+    g.bezierCurveTo(x - w * 0.62, 338, x - w * 0.5 + lean, 320, hx - w * 0.32, 314);
+    g.quadraticCurveTo(hx, 306, hx + w * 0.32, 314);
+    g.bezierCurveTo(x + w * 0.5 + lean, 320, x + w * 0.62, 338, x + w * 0.55, 360);
     g.closePath();
     g.fill();
 
-    // elbows out, arms resting on the counter
-    g.lineWidth = 5.5;
-    g.beginPath();
-    g.moveTo(hx - shw + 1, 319);
-    g.quadraticCurveTo(x - 19, 328, x - 17, 338);
-    g.moveTo(hx + shw - 1, 319);
-    g.quadraticCurveTo(x + 19, 328, x + 17, 338);
-    g.stroke();
+    // pale shirt across the shoulders
+    if (p.pale) {
+      g.fillStyle = "rgba(212, 202, 184, 0.4)";
+      g.beginPath();
+      g.moveTo(hx - w * 0.3, 316);
+      g.quadraticCurveTo(hx, 308, hx + w * 0.3, 316);
+      g.quadraticCurveTo(hx + w * 0.3, 328, hx, 331);
+      g.quadraticCurveTo(hx - w * 0.3, 328, hx - w * 0.3, 316);
+      g.closePath();
+      g.fill();
+    }
 
-    // head above the counter line
+    // head + hair
+    g.fillStyle = "#23202c";
     g.beginPath();
     g.arc(hx, 301, 9.5, 0, Math.PI * 2);
     g.fill();
@@ -872,13 +904,8 @@
         g.arc(hx, 292, 4.5, 0, Math.PI * 2);
         g.fill();
       } else {
-        // hair spilling down to the shoulders
         g.beginPath();
-        g.moveTo(hx - 9, 296);
-        g.quadraticCurveTo(hx - 13, 310, hx - 11, 320);
-        g.lineTo(hx + 11, 320);
-        g.quadraticCurveTo(hx + 13, 310, hx + 9, 296);
-        g.closePath();
+        g.ellipse(hx, 312, 9, 11, 0, 0, Math.PI * 2);
         g.fill();
       }
     }
@@ -886,15 +913,15 @@
 
     // warm rim light on the side facing the counter glow
     const ang = Math.atan2(GLOW.y - 301, GLOW.x - hx);
-    g.strokeStyle = `rgba(255, 195, 125, ${0.42 * alpha})`;
-    g.lineWidth = 2.2;
+    g.strokeStyle = `rgba(255, 195, 130, ${0.32 * alpha})`;
+    g.lineWidth = 2;
     g.beginPath();
     g.arc(hx, 301, 9.5, ang - 1.0, ang + 1.0);
     g.stroke();
-    g.strokeStyle = `rgba(255, 195, 125, ${0.22 * alpha})`;
+    g.strokeStyle = `rgba(255, 195, 130, ${0.16 * alpha})`;
     g.lineWidth = 3;
     g.beginPath();
-    g.arc(hx, 320, 15, ang - 0.7, ang + 0.5);
+    g.arc(hx, 322, 15, ang - 0.7, ang + 0.5);
     g.stroke();
     g.restore();
   }
@@ -903,10 +930,10 @@
     switch (p.state) {
       case "in":
       case "out":
-        drawWalker(g, p, t, p.kind === "passer" ? 0.85 : 1);
+        drawWalker(g, p, t, p.kind === "passer" ? 0.8 : 0.95);
         break;
       case "sitdown": {
-        const k = Math.min(1, (t - p.t0) / 1.1);
+        const k = Math.min(1, (t - p.t0) / 1.3);
         drawWalker(g, p, t, 1 - k, k * 55);
         drawSitter(g, p, t, k);
         break;
@@ -915,7 +942,7 @@
         drawSitter(g, p, t, 1);
         break;
       case "standup": {
-        const k = Math.min(1, (t - p.t0) / 1.1);
+        const k = Math.min(1, (t - p.t0) / 1.3);
         drawSitter(g, p, t, 1 - k);
         drawWalker(g, p, t, k, (1 - k) * 55);
         break;
@@ -924,7 +951,7 @@
   }
 
   // ---------------------------------------------------------------
-  // chef + steam
+  // chef + steam (shop space)
   // ---------------------------------------------------------------
 
   function drawChef(g, t, alpha) {
@@ -934,7 +961,6 @@
 
     g.save();
     g.globalAlpha = alpha;
-    // body in pale working cloth, shoulders sloping, lit from within
     g.fillStyle = "rgba(212, 198, 172, 0.82)";
     g.beginPath();
     g.moveTo(cx - 21, 292 + bob);
@@ -943,14 +969,12 @@
     g.bezierCurveTo(cx + 18, 258 + bob, cx + 21, 270 + bob, cx + 21, 292 + bob);
     g.closePath();
     g.fill();
-    // apron tie
     g.strokeStyle = "rgba(120, 96, 66, 0.45)";
     g.lineWidth = 3;
     g.beginPath();
     g.moveTo(cx - 15, 274 + bob);
     g.lineTo(cx + 15, 274 + bob);
     g.stroke();
-    // an arm at work, small stirring motion
     g.strokeStyle = "rgba(212, 198, 172, 0.72)";
     g.lineWidth = 6;
     g.lineCap = "round";
@@ -958,12 +982,10 @@
     g.moveTo(cx + 13, 262 + bob);
     g.lineTo(cx + 23 + Math.sin(t * 2.3) * 3, 282 + bob + Math.cos(t * 2.3) * 2);
     g.stroke();
-    // head
     g.fillStyle = "#2a2018";
     g.beginPath();
     g.arc(cx, 240 + bob, 10, 0, Math.PI * 2);
     g.fill();
-    // small white cap
     g.fillStyle = "rgba(228, 218, 196, 0.88)";
     g.beginPath();
     g.arc(cx, 236 + bob, 9, Math.PI, 0);
@@ -1015,13 +1037,12 @@
   }
 
   // ---------------------------------------------------------------
-  // light
+  // light (shop space)
   // ---------------------------------------------------------------
 
   function drawGlows(g, t, fl, openK, nightK) {
     if (openK < 0.02) return;
     g.save();
-    // the light lives inside the shop; it should not wash the signboard
     g.beginPath();
     g.rect(232, 140, 296, 292);
     g.clip();
@@ -1042,14 +1063,14 @@
     }
     g.restore();
 
-    // warm haze rising off the whole block at night
+    // warm haze rising off the shop at night
     g.save();
     g.globalCompositeOperation = "lighter";
     const haze = g.createRadialGradient(380, 300, 40, 380, 300, 420);
     haze.addColorStop(0, `rgba(255, 170, 90, ${0.07 * openK * (0.4 + 0.6 * nightK)})`);
     haze.addColorStop(1, "rgba(255, 170, 90, 0)");
     g.fillStyle = haze;
-    g.fillRect(0, 0, W, H);
+    g.fillRect(-380, -260, 1520, 1120);
 
     // sign glows
     g.fillStyle = `rgba(255, 214, 150, ${0.16 * openK})`;
@@ -1068,92 +1089,6 @@
       g.strokeRect(85, 239, 36, 192);
       g.restore();
     }
-  }
-
-  // bokeh: out-of-focus circles of light, like the city seen through
-  // half-closed eyes. distant ones live in the sky; warm ones bloom off
-  // the lanterns; a few float in the light on the street.
-  const bokeh = (() => {
-    const rng = mulberry32(41);
-    const orbs = [];
-    for (let i = 0; i < 17; i++) {
-      const left = rng() > 0.5;
-      orbs.push({
-        kind: "city",
-        x: left ? 20 + rng() * 180 : 540 + rng() * 210,
-        y: 12 + rng() * 95,
-        r: i < 4 ? 9 + rng() * 5 : 4.5 + rng() * 6,
-        warm: rng() > 0.4,
-        a: 0.16 + rng() * 0.16,
-        ph: rng() * 6.28,
-        sp: 0.2 + rng() * 0.5,
-      });
-    }
-    for (const lx of [178, 582]) {
-      for (let i = 0; i < 4; i++) {
-        const ang = rng() * 6.28;
-        const d = 38 + rng() * 44;
-        orbs.push({
-          kind: "lantern",
-          x: lx + Math.cos(ang) * d,
-          y: 164 + Math.sin(ang) * d * 0.8,
-          r: 6 + rng() * 9,
-          warm: true,
-          a: 0.14 + rng() * 0.12,
-          ph: rng() * 6.28,
-          sp: 0.3 + rng() * 0.6,
-        });
-      }
-    }
-    for (let i = 0; i < 6; i++) {
-      orbs.push({
-        kind: "lantern",
-        x: 275 + rng() * 210,
-        y: 126 + rng() * 50,
-        r: 4 + rng() * 7,
-        warm: true,
-        a: 0.11 + rng() * 0.1,
-        ph: rng() * 6.28,
-        sp: 0.3 + rng() * 0.5,
-      });
-    }
-    for (let i = 0; i < 7; i++) {
-      orbs.push({
-        kind: "street",
-        x: 260 + rng() * 240,
-        y: 458 + rng() * 78,
-        r: 3.5 + rng() * 5.5,
-        warm: true,
-        a: 0.08 + rng() * 0.07,
-        ph: rng() * 6.28,
-        sp: 0.2 + rng() * 0.4,
-      });
-    }
-    return orbs;
-  })();
-
-  function drawBokeh(g, t, wd, openK, nightK, kinds) {
-    g.save();
-    g.globalCompositeOperation = "lighter";
-    for (const o of bokeh) {
-      if (!kinds.includes(o.kind)) continue;
-      const gate = o.kind === "city" ? nightK : openK;
-      if (gate < 0.03) continue;
-      const tw = 0.72 + 0.28 * Math.sin(t * o.sp + o.ph);
-      const a = o.a * gate * tw;
-      const dx = Math.sin(t * 0.2 + o.ph) * 1.5 + (o.kind !== "city" ? wd * 2 : 0);
-      const dy = Math.cos(t * 0.17 + o.ph * 1.7) * 1.2;
-      const c = o.warm ? "255, 190, 120" : "235, 225, 210";
-      const grad = g.createRadialGradient(o.x + dx, o.y + dy, o.r * 0.2, o.x + dx, o.y + dy, o.r);
-      grad.addColorStop(0, `rgba(${c}, ${a})`);
-      grad.addColorStop(0.72, `rgba(${c}, ${a * 0.85})`);
-      grad.addColorStop(1, `rgba(${c}, 0)`);
-      g.fillStyle = grad;
-      g.beginPath();
-      g.arc(o.x + dx, o.y + dy, o.r, 0, Math.PI * 2);
-      g.fill();
-    }
-    g.restore();
   }
 
   function drawLightPool(g, t, fl, openK) {
@@ -1179,31 +1114,149 @@
   }
 
   // ---------------------------------------------------------------
-  // the caption under the painting
+  // bokeh — gauzy, half-focused city light (paper coords except shop ones)
   // ---------------------------------------------------------------
 
-  let lastCaption = "";
-
-  function updateCaption(h, openK) {
-    if (!captionEl) return;
-    const hh = Math.floor(h) % 24;
-    const mm = Math.floor((h % 1) * 60);
-    const ampm = hh >= 12 ? "pm" : "am";
-    const h12 = hh % 12 === 0 ? 12 : hh % 12;
-    const time = `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
-    const text = openK > 0.5
-      ? `it is ${time} in tokyo. stay as long as you like.`
-      : `it is ${time} in tokyo — the shop opens at 5pm.`;
-    if (text !== lastCaption) {
-      captionEl.textContent = text;
-      lastCaption = text;
+  const bokeh = (() => {
+    const rng = mulberry32(41);
+    const orbs = [];
+    // the city behind you, breathing in circles of light
+    for (let i = 0; i < 26; i++) {
+      orbs.push({
+        kind: "city",
+        x: rng() * W,
+        y: 16 + rng() * 240,
+        r: 7 + rng() * 13,
+        warm: rng() > 0.45,
+        a: 0.05 + rng() * 0.09,
+        ph: rng() * 6.28,
+        sp: 0.12 + rng() * 0.3,
+      });
     }
+    // warmth drifting off the lanterns (paper coords, near the mapped lanterns)
+    for (const lx of [TX + S * 178, TX + S * 582]) {
+      for (let i = 0; i < 3; i++) {
+        const ang = rng() * 6.28;
+        const d = 26 + rng() * 34;
+        orbs.push({
+          kind: "lantern",
+          x: lx + Math.cos(ang) * d,
+          y: TY + S * 168 + Math.sin(ang) * d * 0.8,
+          r: 6 + rng() * 9,
+          warm: true,
+          a: 0.06 + rng() * 0.08,
+          ph: rng() * 6.28,
+          sp: 0.15 + rng() * 0.35,
+        });
+      }
+    }
+    // faint reflections in the street
+    for (let i = 0; i < 5; i++) {
+      orbs.push({
+        kind: "street",
+        x: 320 + rng() * 200,
+        y: GROUND + 14 + rng() * 60,
+        r: 4 + rng() * 6,
+        warm: true,
+        a: 0.04 + rng() * 0.04,
+        ph: rng() * 6.28,
+        sp: 0.12 + rng() * 0.25,
+      });
+    }
+    return orbs;
+  })();
+
+  function drawBokeh(g, t, openK, nightK, kinds) {
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    for (const o of bokeh) {
+      if (!kinds.includes(o.kind)) continue;
+      const gate = o.kind === "city" ? nightK : openK;
+      if (gate < 0.03) continue;
+      const tw = 0.65 + 0.35 * Math.sin(t * o.sp + o.ph);
+      const a = o.a * gate * tw;
+      const c = o.warm ? "255, 216, 160" : "212, 218, 245";
+      const grad = g.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
+      grad.addColorStop(0, `rgba(${c}, ${a})`);
+      grad.addColorStop(0.55, `rgba(${c}, ${a * 0.55})`);
+      grad.addColorStop(1, `rgba(${c}, 0)`);
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // ---------------------------------------------------------------
+  // mist, neon, vending machine — the dreamy block (paper coords)
+  // ---------------------------------------------------------------
+
+  function drawMist(g, t, nightK) {
+    const strength = 0.4 + 0.6 * nightK;
+    g.save();
+    for (const [my, mr, msp, mph] of [[GROUND - 6, 190, 3.2, 0], [GROUND + 40, 240, 2.1, 2.5], [230, 260, 1.4, 4.6]]) {
+      const mx = ((t * msp + mph * 130) % (W + 500)) - 250;
+      const grad = g.createRadialGradient(mx, my, 0, mx, my, mr);
+      grad.addColorStop(0, `rgba(178, 182, 210, ${0.045 * strength})`);
+      grad.addColorStop(1, "rgba(178, 182, 210, 0)");
+      g.fillStyle = grad;
+      g.save();
+      g.translate(mx, my);
+      g.scale(1, 0.28);
+      g.translate(-mx, -my);
+      g.beginPath();
+      g.arc(mx, my, mr, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    g.restore();
+  }
+
+  function drawStreetLife(g, t, fl, nightK) {
+    if (nightK < 0.03) return;
+    g.save();
+
+    // the neon strip, humming rose-pink
+    g.shadowColor = `rgba(240, 130, 170, ${0.55 * nightK})`;
+    g.shadowBlur = 16;
+    g.fillStyle = `rgba(244, 150, 185, ${(0.2 + fl * 0.05) * nightK})`;
+    g.fillRect(797, 264, 11, 74);
+    g.shadowBlur = 0;
+    g.fillStyle = `rgba(255, 190, 215, ${0.3 * nightK})`;
+    g.fillRect(800, 268, 3, 66);
+
+    // the vending machine, awake all night
+    g.shadowColor = `rgba(150, 200, 255, ${0.5 * nightK})`;
+    g.shadowBlur = 14;
+    g.fillStyle = `rgba(160, 205, 250, ${(0.16 + fl * 0.04) * nightK})`;
+    g.fillRect(703, 334, 24, 30);
+    g.shadowBlur = 0;
+    g.fillStyle = `rgba(220, 235, 255, ${0.25 * nightK})`;
+    for (let i = 0; i < 3; i++) g.fillRect(706 + i * 7, 340, 4, 6);
+    // its little pool of cold light
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    const vp = g.createRadialGradient(715, 384, 2, 715, 384, 46);
+    vp.addColorStop(0, `rgba(150, 200, 255, ${0.08 * nightK})`);
+    vp.addColorStop(1, "rgba(150, 200, 255, 0)");
+    g.fillStyle = vp;
+    g.save();
+    g.translate(715, 384);
+    g.scale(1, 0.35);
+    g.translate(-715, -384);
+    g.beginPath();
+    g.arc(715, 384, 46, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    g.restore();
+
+    g.restore();
   }
 
   // ---------------------------------------------------------------
   // the paper: a webgl pass that turns each frame into watercolor —
   // wobbled edges, pigment granulation, washes, and color blending
-  // (the same way farayan's san francisco piece works)
   // ---------------------------------------------------------------
 
   function createPainter(target) {
@@ -1244,7 +1297,7 @@
         // hand wobble: no line stays quite straight
         vec2 wf = uv * vec2(9.0, 6.6);
         vec2 warp = vec2(fbm(wf), fbm(wf + vec2(5.2, 1.3))) - 0.5;
-        vec2 wuv = uv + warp * px * 5.0;
+        vec2 wuv = uv + warp * px * 4.5;
 
         // gentle diffusion, pigment spreading into wet paper
         vec3 c = texture2D(uTex, wuv).rgb * 0.38;
@@ -1258,17 +1311,19 @@
         // granulation: coarse pigment blotches and the fine tooth of the sheet
         float g1 = fbm(uv * uRes / 7.0);
         float g2 = vnoise(uv * uRes / 2.2);
-        float mid = smoothstep(0.02, 0.22, lum) * (1.0 - smoothstep(0.65, 1.0, lum));
-        c *= 1.0 + (g1 - 0.5) * 0.30 * mid + (g2 - 0.5) * 0.16 * mid;
+        float mid = smoothstep(0.02, 0.22, lum) * (1.0 - smoothstep(0.6, 0.98, lum));
+        c *= 1.0 + (g1 - 0.5) * 0.3 * mid + (g2 - 0.5) * 0.16 * mid;
+        // the paper's tooth shows faintly even where the wash is pale
+        c *= 1.0 + (g1 - 0.5) * 0.06 * smoothstep(0.6, 0.95, lum);
 
         // slow washes of tone drifting across the sheet
         float wash = fbm(uv * 2.6 + 3.7);
-        c *= 1.0 + (wash - 0.5) * 0.12;
+        c *= 1.0 + (wash - 0.5) * 0.1;
 
         // color blending: shadows cool off, light warms up, black lifts to paper
-        c = mix(c, c * vec3(0.95, 0.98, 1.07), (1.0 - lum) * 0.28);
-        c = mix(c, c * vec3(1.07, 1.0, 0.93), smoothstep(0.45, 0.9, lum) * 0.2);
-        c += vec3(0.040, 0.032, 0.026) * (1.0 - smoothstep(0.0, 0.35, lum));
+        c = mix(c, c * vec3(0.94, 0.97, 1.09), (1.0 - lum) * 0.3);
+        c = mix(c, c * vec3(1.06, 1.0, 0.94), smoothstep(0.45, 0.9, lum) * 0.16);
+        c += vec3(0.05, 0.045, 0.04) * (1.0 - smoothstep(0.0, 0.35, lum));
 
         gl_FragColor = vec4(c, 1.0);
       }`;
@@ -1324,6 +1379,28 @@
   }
 
   // ---------------------------------------------------------------
+  // the caption under the painting
+  // ---------------------------------------------------------------
+
+  let lastCaption = "";
+
+  function updateCaption(h, openK) {
+    if (!captionEl) return;
+    const hh = Math.floor(h) % 24;
+    const mm = Math.floor((h % 1) * 60);
+    const ampm = hh >= 12 ? "pm" : "am";
+    const h12 = hh % 12 === 0 ? 12 : hh % 12;
+    const time = `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
+    const text = openK > 0.5
+      ? `it is ${time} in tokyo. stay as long as you like.`
+      : `it is ${time} in tokyo — the shop opens at 5pm.`;
+    if (text !== lastCaption) {
+      captionEl.textContent = text;
+      lastCaption = text;
+    }
+  }
+
+  // ---------------------------------------------------------------
   // frame
   // ---------------------------------------------------------------
 
@@ -1354,16 +1431,19 @@
     const fl = flicker(t);
 
     const g = offCtx;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    canvasSpace(g);
 
-    // sky
-    const sky = g.createLinearGradient(0, 0, 0, H * 0.85);
+    // sky, the color of the hour
+    const sky = g.createLinearGradient(0, 0, 0, GROUND + 30);
     sky.addColorStop(0, rgb(P.sky0));
     sky.addColorStop(1, rgb(P.sky1));
     g.fillStyle = sky;
     g.fillRect(0, 0, W, H);
 
-    // the shopfront, tinted by the hour
+    // the city's bokeh, behind everything
+    drawBokeh(g, t, openK, nightK, ["city"]);
+
+    // the block, tinted by the hour
     if (canFilter) g.filter = `brightness(${P.bright.toFixed(3)}) saturate(${P.sat.toFixed(3)})`;
     g.drawImage(facadeLayer, 0, 0, W, H);
     if (canFilter) g.filter = "none";
@@ -1371,42 +1451,44 @@
     // lit windows far away
     if (nightK > 0.05) {
       for (const wdw of cityWindows) {
-        g.fillStyle = `rgba(214, 160, 88, ${wdw.a * nightK})`;
-        g.fillRect(wdw.x, wdw.y, 5, 7);
+        g.fillStyle = `rgba(214, 170, 100, ${wdw.a * nightK})`;
+        g.fillRect(wdw.x, wdw.y, 7, 9);
       }
     }
-    drawBokeh(g, t, wd, openK, nightK, ["city"]);
 
     // daylight reaching the street
     const dayK = 1 - nightK;
     if (dayK > 0.02) {
-      const dg = g.createLinearGradient(0, 430, 0, H);
+      const dg = g.createLinearGradient(0, GROUND, 0, H);
       dg.addColorStop(0, `rgba(208, 200, 188, ${0.16 * dayK})`);
       dg.addColorStop(1, `rgba(208, 200, 188, ${0.08 * dayK})`);
       g.fillStyle = dg;
-      g.fillRect(0, 430, W, H - 430);
+      g.fillRect(0, GROUND, W, H - GROUND);
     }
+
+    drawStreetLife(g, t, fl, nightK);
+
+    // --- inside the shop's little world ---
+    sceneSpace(g);
 
     drawGlows(g, t, fl, openK, nightK);
     drawChef(g, t, openK);
     updateSteam(dt, t, wd, openK);
     drawSteam(g);
 
-    // people: schedule arrivals + passers-by
     if (openK > 0.9 && t > nextArrival) {
       const ok = spawnPatron(t);
-      nextArrival = t + (ok ? rand(9, 26) : rand(5, 11));
+      nextArrival = t + (ok ? rand(14, 40) : rand(8, 16));
     }
     if (t > nextPasser) {
       spawnPasser();
-      nextPasser = t + (openK > 0.5 ? rand(16, 44) : rand(9, 26));
+      nextPasser = t + (openK > 0.5 ? rand(25, 70) : rand(12, 34));
     }
     for (const p of people) updatePerson(p, dt, t, openK);
     for (let i = people.length - 1; i >= 0; i--) {
       if (people[i].dead) people.splice(i, 1);
     }
 
-    // patrons behind, passers-by in front
     for (const p of people) if (p.kind === "patron") drawPerson(g, p, t);
 
     drawShutter(g, openK);
@@ -1415,15 +1497,20 @@
     for (const l of bigLanterns) drawBigLantern(g, l, t, wd, fl, openK);
 
     drawLightPool(g, t, fl, openK);
-    drawBokeh(g, t, wd, openK, nightK, ["lantern", "street"]);
     for (const p of people) if (p.kind === "passer") drawPerson(g, p, t);
+
+    // --- back out on the street ---
+    canvasSpace(g);
+
+    drawBokeh(g, t, openK, nightK, ["lantern", "street"]);
+    drawMist(g, t, nightK);
 
     // the color of the hour, washed over everything
     g.fillStyle = `rgba(${P.air[0] | 0}, ${P.air[1] | 0}, ${P.air[2] | 0}, ${P.air[3]})`;
     g.fillRect(0, 0, W, H);
 
     // a slow breath over the whole scene, like the evening exhaling
-    g.fillStyle = `rgba(23, 17, 13, ${(0.05 + 0.035 * Math.sin(t * 0.11)) * (0.4 + 0.6 * nightK)})`;
+    g.fillStyle = `rgba(30, 26, 40, ${(0.04 + 0.03 * Math.sin(t * 0.09)) * (0.3 + 0.7 * nightK)})`;
     g.fillRect(0, 0, W, H);
 
     g.drawImage(fgLayer, 0, 0, W, H);
@@ -1432,7 +1519,6 @@
     if (painter) {
       painter.draw(off);
     } else {
-      // no webgl: fall back to a gentle diffusion
       ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx2d.clearRect(0, 0, W, H);
       ctx2d.drawImage(off, 0, 0, W, H);
@@ -1474,14 +1560,13 @@
     seatPatronNow(0, false);
     seatPatronNow(0, true);
   }
-  nextArrival = rand(4, 9);
-  nextPasser = rand(5, 12);
+  nextArrival = rand(6, 14);
+  nextPasser = rand(8, 20);
 
   window.__izakaya = { people, stools, spawnPatron, spawnPasser, get t() { return tAnim; }, get hour() { return currentHour(); } };
 
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduced) {
-    // a still painting: run the scene forward, then hold one frame
     for (let i = 0; i < 180; i++) frame(i * 16.7);
   } else {
     requestAnimationFrame(loop);

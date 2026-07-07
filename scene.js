@@ -1071,6 +1071,92 @@
     }
   }
 
+  // bokeh: out-of-focus circles of light, like the city seen through
+  // half-closed eyes. distant ones live in the sky; warm ones bloom off
+  // the lanterns; a few float in the light on the street.
+  const bokeh = (() => {
+    const rng = mulberry32(41);
+    const orbs = [];
+    for (let i = 0; i < 17; i++) {
+      const left = rng() > 0.5;
+      orbs.push({
+        kind: "city",
+        x: left ? 20 + rng() * 180 : 540 + rng() * 210,
+        y: 12 + rng() * 95,
+        r: i < 4 ? 9 + rng() * 5 : 4.5 + rng() * 6,
+        warm: rng() > 0.4,
+        a: 0.16 + rng() * 0.16,
+        ph: rng() * 6.28,
+        sp: 0.2 + rng() * 0.5,
+      });
+    }
+    for (const lx of [178, 582]) {
+      for (let i = 0; i < 4; i++) {
+        const ang = rng() * 6.28;
+        const d = 38 + rng() * 44;
+        orbs.push({
+          kind: "lantern",
+          x: lx + Math.cos(ang) * d,
+          y: 164 + Math.sin(ang) * d * 0.8,
+          r: 6 + rng() * 9,
+          warm: true,
+          a: 0.14 + rng() * 0.12,
+          ph: rng() * 6.28,
+          sp: 0.3 + rng() * 0.6,
+        });
+      }
+    }
+    for (let i = 0; i < 6; i++) {
+      orbs.push({
+        kind: "lantern",
+        x: 275 + rng() * 210,
+        y: 126 + rng() * 50,
+        r: 4 + rng() * 7,
+        warm: true,
+        a: 0.11 + rng() * 0.1,
+        ph: rng() * 6.28,
+        sp: 0.3 + rng() * 0.5,
+      });
+    }
+    for (let i = 0; i < 7; i++) {
+      orbs.push({
+        kind: "street",
+        x: 260 + rng() * 240,
+        y: 458 + rng() * 78,
+        r: 3.5 + rng() * 5.5,
+        warm: true,
+        a: 0.08 + rng() * 0.07,
+        ph: rng() * 6.28,
+        sp: 0.2 + rng() * 0.4,
+      });
+    }
+    return orbs;
+  })();
+
+  function drawBokeh(g, t, wd, openK, nightK, kinds) {
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    for (const o of bokeh) {
+      if (!kinds.includes(o.kind)) continue;
+      const gate = o.kind === "city" ? nightK : openK;
+      if (gate < 0.03) continue;
+      const tw = 0.72 + 0.28 * Math.sin(t * o.sp + o.ph);
+      const a = o.a * gate * tw;
+      const dx = Math.sin(t * 0.2 + o.ph) * 1.5 + (o.kind !== "city" ? wd * 2 : 0);
+      const dy = Math.cos(t * 0.17 + o.ph * 1.7) * 1.2;
+      const c = o.warm ? "255, 190, 120" : "235, 225, 210";
+      const grad = g.createRadialGradient(o.x + dx, o.y + dy, o.r * 0.2, o.x + dx, o.y + dy, o.r);
+      grad.addColorStop(0, `rgba(${c}, ${a})`);
+      grad.addColorStop(0.72, `rgba(${c}, ${a * 0.85})`);
+      grad.addColorStop(1, `rgba(${c}, 0)`);
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(o.x + dx, o.y + dy, o.r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
   function drawLightPool(g, t, fl, openK) {
     if (openK < 0.02) return;
     g.save();
@@ -1165,6 +1251,7 @@
         g.fillRect(wdw.x, wdw.y, 5, 7);
       }
     }
+    drawBokeh(g, t, wd, openK, nightK, ["city"]);
 
     // daylight reaching the street
     const dayK = 1 - nightK;
@@ -1204,6 +1291,7 @@
     for (const l of bigLanterns) drawBigLantern(g, l, t, wd, fl, openK);
 
     drawLightPool(g, t, fl, openK);
+    drawBokeh(g, t, wd, openK, nightK, ["lantern", "street"]);
     for (const p of people) if (p.kind === "passer") drawPerson(g, p, t);
 
     // the color of the hour, washed over everything
